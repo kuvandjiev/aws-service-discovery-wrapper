@@ -157,7 +157,7 @@ def main():
     parser.add_argument('--extra', nargs=2, action='append')
     args = parser.parse_args()
 
-    extra_attributes = {k: v for k, v in args.extra}
+    extra_attributes = {k: v for k, v in args.extra} if args.extra else {}
     if extra_attributes:
         print(f"Extra attributes provided: {extra_attributes}")
 
