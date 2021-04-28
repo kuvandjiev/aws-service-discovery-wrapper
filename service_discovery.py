@@ -152,15 +152,20 @@ def check_required_keys(data: dict, required_keys: list):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", help="Operation - register_instance, deregister_instance, delete_service")
+    parser.add_argument("operation", help="Operation - register_instance, update_instance, deregister_instance, delete_service")
     parser.add_argument("service_discovery_data_json", help="Path to JSON file with service information")
+    parser.add_argument('--extra', nargs=2, action='append')
     args = parser.parse_args()
+
+    extra_attributes = {k: v for k, v in args.extra}
+    if extra_attributes:
+        print(f"Extra attributes provided: {extra_attributes}")
 
     operation = args.operation
     data_file = open(args.service_discovery_data_json, "r")
     service_data = json.loads(data_file.read())
 
-    valid_operations = ['register_instance', 'deregister_instance', 'delete_service', 'get_instances']
+    valid_operations = ['register_instance', 'deregister_instance', 'update_instance', 'delete_service', 'get_instances']
     if operation not in valid_operations:
         raise RuntimeError(f'{operation} is not a valid operation. Please pass one of {valid_operations}')
 
@@ -181,15 +186,33 @@ def main():
                                       service_description=service_description,
                                       client=client)
 
-    # if not service_id:
-    #    raise RuntimeError('Service not registered')
-
     if operation == 'register_instance':
         check_required_keys(data=service_data, required_keys=['namespace', 'service_name', 'type', 'instance_name'])
         print(f"Registering instance...")
-        operation_id = register_instance(service_id=service_id, custom_attributes=service_data, client=client)
+        operation_id = register_instance(service_id=service_id, custom_attributes={**service_data, **extra_attributes}, client=client)
         print(f"Operation with id {operation_id} submitted. Checking status...")
         await_operation_result(operation_id=operation_id, client=client)
+    elif operation == 'update_instance':
+        check_required_keys(data=service_data, required_keys=['namespace', 'service_name', 'instance_name'])
+        instance_name = service_data.get("instance_name", None)
+        print(f"Updating instance with name {instance_name}...")
+        for instance in get_instances_for_service(service_id=service_id, client=client):
+            current_attributes = instance.get("Attributes", {})
+            if current_attributes.get('instance_name') == instance_name:
+                # order is important when merging the dicts here
+                # namespace, service_name and instance_name must not remain unchanged
+                custom_attributes = {**current_attributes,
+                                     **service_data,
+                                     **extra_attributes,
+                                     'namespace': service_data.get('namespace'),
+                                     'service_name': service_data.get('service_name'),
+                                     'instance_name': service_data.get('instance_name')
+                                     }
+                operation_id = register_instance(service_id=service_id,
+                                                 custom_attributes=custom_attributes,
+                                                 client=client)
+                print(f"Operation with id {operation_id} submitted. Checking status...")
+                await_operation_result(operation_id=operation_id, client=client)
     elif operation == 'deregister_instance':
         check_required_keys(data=service_data, required_keys=['namespace', 'service_name', 'instance_name'])
         instance_name = service_data.get("instance_name", None)
